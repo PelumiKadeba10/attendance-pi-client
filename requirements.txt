@@ -1,0 +1,7 @@
+requests
+insightface
+opencv-python
+numpy
+pandas
+openpyxl
+
