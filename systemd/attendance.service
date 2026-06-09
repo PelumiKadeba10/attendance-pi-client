@@ -5,14 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/attendance-pi-client
-ExecStart=/usr/bin/python3 /opt/attendance-pi-client/app.py
+WorkingDirectory=/home/attendance/attendance-pi-client
+ExecStart=/home/attendance/attendance-pi-client/venv/bin/python /home/attendance/attendance-pi-client/app.py
 Restart=always
 RestartSec=5
-User=pi
-Group=pi
+User=attendance
+Group=attendance
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-
