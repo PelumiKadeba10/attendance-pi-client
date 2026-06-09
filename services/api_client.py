@@ -123,3 +123,13 @@ class BackendApiClient:
             response_payload.setdefault("success", False)
             response_payload.setdefault("message", "Network failure")
         return response_payload
+
+    def post_device_log(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = self._request("POST", "/api/device/logs", json_payload=payload)
+        response_payload = response.get("payload")
+        if not isinstance(response_payload, dict):
+            response_payload = {}
+        response_payload["ok"] = bool(response.get("ok"))
+        response_payload["status_code"] = response.get("status_code")
+        response_payload["network_error"] = bool(response.get("network_error"))
+        return response_payload

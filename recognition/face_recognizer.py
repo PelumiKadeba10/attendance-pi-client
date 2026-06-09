@@ -42,11 +42,12 @@ class RecognitionHandle:
 
 
 class InsightFaceRecognizer:
-    def __init__(self, embedding_client=None) -> None:
+    def __init__(self, embedding_client=None, event_logger=None) -> None:
         self.logger = get_logger(__name__)
         self.camera = CameraStream()
         self.tracker = CentroidTracker()
         self.embedding_client = embedding_client
+        self.event_logger = event_logger
         self.face_app = self._create_face_app()
 
     def _create_face_app(self):
@@ -89,6 +90,15 @@ class InsightFaceRecognizer:
     def _process_frame(self, frame, callback: Callable[[str, float], None]) -> None:
         now = datetime.now()
         detections = self._detect_faces(frame)
+        if detections and self.event_logger is not None:
+            try:
+                self.event_logger(
+                    "FACE_DETECTED",
+                    "Face detected in camera frame.",
+                    {"count": len(detections)},
+                )
+            except Exception:
+                self.logger.debug("Device log sink failed during face detection.", exc_info=True)
         tracks = self.tracker.update(detections, now=now)
 
         for track in tracks:
@@ -164,6 +174,7 @@ def start_recognition(
     callback: Callable[[str, float], None],
     stop_event: Optional[threading.Event] = None,
     embedding_client=None,
+    event_logger=None,
 ) -> RecognitionHandle:
     """Start the recognition pipeline on a daemon thread.
 
@@ -173,7 +184,7 @@ def start_recognition(
 
     logger = get_logger(__name__)
     stop_event = stop_event or threading.Event()
-    recognizer = InsightFaceRecognizer(embedding_client=embedding_client)
+    recognizer = InsightFaceRecognizer(embedding_client=embedding_client, event_logger=event_logger)
 
     thread = threading.Thread(
         target=recognizer.run,

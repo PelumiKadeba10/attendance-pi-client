@@ -15,6 +15,7 @@ from config import (
 )
 from recognition.face_recognizer import start_recognition
 from services.api_client import BackendApiClient
+from services.device_log_service import DeviceLogService
 from services.attendance_collector import AttendanceCollector
 from services.embedding_client import EmbeddingClient
 from services.export_service import ExportService
@@ -31,6 +32,7 @@ class RuntimeContext:
     collector: AttendanceCollector
     export_service: ExportService
     upload_service: UploadService
+    device_logger: DeviceLogService
     stop_event: threading.Event
 
 
@@ -48,11 +50,13 @@ class PiAttendanceApp:
         self._recognition_handle = None
 
         api_client = BackendApiClient()
+        device_logger = DeviceLogService(api_client=api_client, device_id=DEVICE_ID)
         session_manager = SessionManager(api_client=api_client)
         embedding_client = EmbeddingClient(api_client=api_client)
         collector = AttendanceCollector()
         export_service = ExportService(export_dir=ATTENDANCE_EXPORT_DIR)
         upload_service = UploadService(api_client=api_client)
+        device_logger.start()
 
         self.ctx = RuntimeContext(
             api_client=api_client,
@@ -61,6 +65,7 @@ class PiAttendanceApp:
             collector=collector,
             export_service=export_service,
             upload_service=upload_service,
+            device_logger=device_logger,
             stop_event=self.stop_event,
         )
 
@@ -80,6 +85,11 @@ class PiAttendanceApp:
             self._recognition_handle.stop()
             self._recognition_handle = None
             self.logger.info("Recognition pipeline stopped.")
+            self.ctx.device_logger.log(
+                "RECOGNITION_STOPPED",
+                "Recognition pipeline stopped.",
+                {"state": self._last_state},
+            )
 
     def _ensure_recognition(self) -> None:
         with self._recognition_lock:
@@ -89,8 +99,14 @@ class PiAttendanceApp:
                 callback=self._recognition_callback,
                 stop_event=self.stop_event,
                 embedding_client=self.ctx.embedding_client,
+                event_logger=self.ctx.device_logger.log,
             )
             self.logger.info("Recognition pipeline started.")
+            self.ctx.device_logger.log(
+                "RECOGNITION_STARTED",
+                "Recognition pipeline started.",
+                {"state": self._last_state},
+            )
 
     def _flush_collector(self, session_id: str, course_code: str, reason: str) -> bool:
         with self._flush_lock:
@@ -109,6 +125,15 @@ class PiAttendanceApp:
                 session_id,
                 reason,
             )
+            self.ctx.device_logger.log(
+                "FLUSH_STARTED",
+                "Attendance flush started.",
+                {
+                    "session_id": session_id,
+                    "record_count": len(batch["records"]),
+                    "reason": reason,
+                },
+            )
 
             self.ctx.export_service.export_batch(
                 payload=batch,
@@ -120,9 +145,27 @@ class PiAttendanceApp:
             if upload_success:
                 self.ctx.collector.clear_batch()
                 self.logger.info("Attendance collector cleared after successful flush.")
+                self.ctx.device_logger.log(
+                    "FLUSH_SUCCESS",
+                    "Attendance flush completed successfully.",
+                    {
+                        "session_id": session_id,
+                        "record_count": len(batch["records"]),
+                        "reason": reason,
+                    },
+                )
                 return True
 
             self.logger.error("Flush failed; collector retained for retry.")
+            self.ctx.device_logger.log(
+                "FLUSH_FAILED",
+                "Attendance flush failed.",
+                {
+                    "session_id": session_id,
+                    "record_count": len(batch["records"]),
+                    "reason": reason,
+                },
+            )
             return False
 
     def _recognition_callback(self, student_id: str, confidence: float) -> None:
@@ -135,6 +178,15 @@ class PiAttendanceApp:
             return
 
         self.ctx.collector.record_detection(student_id=student_id, confidence=confidence)
+        self.ctx.device_logger.log(
+            "ATTENDANCE_RECORDED",
+            "Attendance candidate recorded locally.",
+            {
+                "student_id": student_id,
+                "confidence": round(float(confidence), 4),
+                "session_id": self._last_session_id,
+            },
+        )
 
     def _session_context(self) -> tuple[Optional[dict[str, Any]], str, Optional[str], Optional[str]]:
         session = self.ctx.session_manager.get_primary_active_session()
@@ -175,6 +227,15 @@ class PiAttendanceApp:
                 state,
                 session_id,
             )
+            self.ctx.device_logger.log(
+                "SESSION_STATE_CHANGE",
+                "State machine transition.",
+                {
+                    "previous": previous_state,
+                    "current": state,
+                    "session_id": session_id or "UNKNOWN",
+                },
+            )
             self._last_state = state
 
         # -----------------------------
@@ -206,6 +267,11 @@ class PiAttendanceApp:
             return
     def run(self) -> None:
         self.logger.info("Starting attendance Pi client for device %s.", DEVICE_ID)
+        self.ctx.device_logger.log(
+            "SYSTEM_START",
+            "Pi attendance client booted.",
+            {"device_id": DEVICE_ID},
+        )
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
         self.ctx.session_manager.restore_state()
@@ -232,6 +298,11 @@ class PiAttendanceApp:
                     self._run_state_machine()
                 except Exception:
                     self.logger.exception("Unhandled error in lifecycle loop.")
+                    self.ctx.device_logger.log(
+                        "SYSTEM_ERROR",
+                        "Unhandled error in lifecycle loop.",
+                        {"component": "main_loop"},
+                    )
                 time.sleep(1)
         finally:
             self.stop_event.set()
@@ -247,6 +318,12 @@ class PiAttendanceApp:
                     reason="graceful shutdown",
                 )
             self.logger.info("Attendance Pi client stopped.")
+            self.ctx.device_logger.log(
+                "SYSTEM_STOP",
+                "Pi attendance client stopped.",
+                {"device_id": DEVICE_ID},
+            )
+            self.ctx.device_logger.stop()
 
 
 def main() -> None:
