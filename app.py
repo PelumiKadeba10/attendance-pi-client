@@ -154,34 +154,56 @@ class PiAttendanceApp:
         return session, state, session_id, course_code
 
     def _run_state_machine(self) -> None:
-        session, state, session_id, course_code = self._session_context()
+        session, raw_state, session_id, course_code = self._session_context()
         previous_state = self._last_state
 
+        # -----------------------------
+        # 1. MAP BACKEND STATE → PI STATE
+        # -----------------------------
+        if raw_state == "active":
+            state = "RECORDING"
+        elif raw_state == "inactive":
+            state = "IDLE"
+        else:
+            state = "IDLE"
+
+        # track state change
         if state != previous_state:
+            self.logger.info(
+                "STATE_CHANGE previous=%s current=%s session_id=%s",
+                previous_state,
+                state,
+                session_id,
+            )
             self._last_state = state
 
+        # -----------------------------
+        # 2. RECORDING STATE → START AI
+        # -----------------------------
         if state == "RECORDING":
             self._ensure_recognition()
             return
 
+        # if not recording → stop camera
         self._stop_recognition()
 
-        if previous_state != "STOPPED" and state == "STOPPED" and session_id and course_code:
+        # -----------------------------
+        # 3. STOPPED LOGIC (flush data)
+        # -----------------------------
+        if previous_state == "RECORDING" and state == "IDLE" and session_id and course_code:
             self._flush_collector(
                 session_id=session_id,
                 course_code=course_code,
-                reason="session stopped",
+                reason="session ended",
             )
             return
 
-        if state == "READY":
-            self.logger.debug("Session is ready but not yet recording.")
-            return
-
+        # -----------------------------
+        # 4. IDLE / READY STATES
+        # -----------------------------
         if state == "IDLE":
-            self.logger.debug("Session manager is idle.")
+            self.logger.debug("System idle - waiting for active session.")
             return
-
     def run(self) -> None:
         self.logger.info("Starting attendance Pi client for device %s.", DEVICE_ID)
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
