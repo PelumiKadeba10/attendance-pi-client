@@ -90,23 +90,16 @@ class InsightFaceRecognizer:
     def _process_frame(self, frame, callback: Callable[[str, float], None]) -> None:
         now = datetime.now()
         detections = self._detect_faces(frame)
-        if detections and self.event_logger is not None:
-            try:
-                self.event_logger(
-                    "FACE_DETECTED",
-                    "Face detected in camera frame.",
-                    {"count": len(detections)},
-                )
-            except Exception:
-                self.logger.debug("Device log sink failed during face detection.", exc_info=True)
         tracks = self.tracker.update(detections, now=now)
 
+        # 🚀 OPTIMIZATION: Map bounding boxes to detections in a fast lookup dictionary
+        # We turn the bbox list into a tuple so it can be used as a dictionary key
+        detection_lookup = {tuple(det["bbox"]): det for det in detections}
+
         for track in tracks:
-            matching_detection = None
-            for detection in detections:
-                if tuple(detection["bbox"]) == tuple(track["bbox"]):
-                    matching_detection = detection
-                    break
+            # Instantly find the matching detection without a nested loop
+            track_bbox = tuple(track["bbox"])
+            matching_detection = detection_lookup.get(track_bbox)
 
             if matching_detection is None:
                 continue
@@ -140,7 +133,7 @@ class InsightFaceRecognizer:
                 now=now,
             )
             callback(student_id, float(match_score))
-
+            
     def run(self, callback: Callable[[str, float], None], stop_event: threading.Event) -> None:
         self.logger.info("Recognition loop started.")
         while not stop_event.is_set():

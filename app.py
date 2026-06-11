@@ -7,6 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
+import cv2
 
 from config import (
     ATTENDANCE_EXPORT_DIR,
@@ -68,6 +69,17 @@ class PiAttendanceApp:
             device_logger=device_logger,
             stop_event=self.stop_event,
         )
+        
+    def _is_camera_available(self) -> bool:
+        # 0 is usually the default Raspberry Pi camera index
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            return False
+        
+        # Try to read a single frame to ensure it's actually streaming
+        ret, frame = cap.read()
+        cap.release()  # CRITICAL: Always release it so the AI pipeline can use it next!
+        return bool(ret)
 
     def _current_primary_session(self) -> Optional[dict[str, Any]]:
         return self.ctx.session_manager.get_primary_active_session()
@@ -95,6 +107,18 @@ class PiAttendanceApp:
         with self._recognition_lock:
             if self._recognition_handle is not None:
                 return
+            
+            # ----HARDWARE CHECK ----
+            if not self._is_camera_available():
+                self.logger.error("Hardware Alert: Camera is not connected or inaccessible!")
+                self.ctx.device_logger.log(
+                    "HARDWARE_ERROR",
+                    "Camera check failed before recognition start.",
+                    {"component": "camera_v1", "state": self._last_state}
+                )
+                return  # Halt here; don't start the recognition pipeline
+            # ----------------------------
+                    
             self._recognition_handle = start_recognition(
                 callback=self._recognition_callback,
                 stop_event=self.stop_event,
@@ -178,15 +202,15 @@ class PiAttendanceApp:
             return
 
         self.ctx.collector.record_detection(student_id=student_id, confidence=confidence)
-        self.ctx.device_logger.log(
-            "ATTENDANCE_RECORDED",
-            "Attendance candidate recorded locally.",
-            {
-                "student_id": student_id,
-                "confidence": round(float(confidence), 4),
-                "session_id": self._last_session_id,
-            },
-        )
+        # self.ctx.device_logger.log(
+        #     "ATTENDANCE_RECORDED",
+        #     "Attendance candidate recorded locally.",
+        #     {
+        #         "student_id": student_id,
+        #         "confidence": round(float(confidence), 4),
+        #         "session_id": self._last_session_id,
+        #     },
+        # )
 
     def _session_context(self) -> tuple[Optional[dict[str, Any]], str, Optional[str], Optional[str]]:
         session = self.ctx.session_manager.get_primary_active_session()
@@ -265,6 +289,8 @@ class PiAttendanceApp:
         if state == "IDLE":
             self.logger.debug("System idle - waiting for active session.")
             return
+        
+        
     def run(self) -> None:
         self.logger.info("Starting attendance Pi client for device %s.", DEVICE_ID)
         self.ctx.device_logger.log(
