@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Accuracy Test with 5 LFW Subjects
 Uses your local buffalo_l model
@@ -7,16 +8,29 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 from pathlib import Path
-import random
+import sys
 
 print("="*60)
 print("LFW 5-PERSON ACCURACY TEST")
 print("="*60)
 
-# Load model from local folder
+# Load model from correct local path
 print("\n[1/3] Loading InsightFace model...")
-model_path = Path(__file__).parent / "models " / "buffalo_l"
-app = FaceAnalysis(name='buffalo_l', root=str(model_path))
+model_root = Path(__file__).parent / "models"
+
+# Check if buffalo_l exists
+buffalo_path = model_root / "buffalo_l"
+if not buffalo_path.exists():
+    print(f"❌ Model not found at {buffalo_path}")
+    print("Current models folder contents:")
+    for p in model_root.iterdir():
+        print(f"  - {p.name}")
+    sys.exit(1)
+
+print(f"✓ Found model at: {buffalo_path}")
+
+# Initialize with correct root (parent of buffalo_l)
+app = FaceAnalysis(name='buffalo_l', root=str(model_root))
 app.prepare(ctx_id=0, det_size=(320, 320))
 print("✓ Model loaded")
 
