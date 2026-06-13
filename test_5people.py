@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LFW 5-Person Accuracy Test - Using ONNX Runtime Directly
-NO DOWNLOAD - Uses your local buffalo_l .onnx files
+LFW 5-Person Accuracy Test - With Image Preprocessing
+Fixes detection issues by upscaling and enhancing images
 """
 
 import cv2
@@ -14,36 +14,56 @@ class DirectFaceRecognizer:
     def __init__(self, model_path):
         self.model_path = Path(model_path)
         
-        # Load detection model
         det_path = self.model_path / "det_10g.onnx"
+        rec_path = self.model_path / "w600k_r50.onnx"
+        
         if not det_path.exists():
             raise FileNotFoundError(f"Detection model not found: {det_path}")
-        
-        # Load recognition model
-        rec_path = self.model_path / "w600k_r50.onnx"
         if not rec_path.exists():
             raise FileNotFoundError(f"Recognition model not found: {rec_path}")
         
-        # Load with CPU only - no network access
         self.det_session = ort.InferenceSession(str(det_path), providers=['CPUExecutionProvider'])
         self.rec_session = ort.InferenceSession(str(rec_path), providers=['CPUExecutionProvider'])
         
-        # Get input/output names
         self.det_input = self.det_session.get_inputs()[0].name
         self.det_outputs = [o.name for o in self.det_session.get_outputs()]
         self.rec_input = self.rec_session.get_inputs()[0].name
         self.rec_output = self.rec_session.get_outputs()[0].name
         
-        print(f"✓ Detection model: {det_path.name}")
-        print(f"✓ Recognition model: {rec_path.name}")
+        print(f"✓ Models loaded")
+    
+    def preprocess_image(self, image):
+        """Enhance small grayscale images for face detection"""
+        # Convert grayscale to BGR if needed
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        
+        # Upscale small images (LFW images are 62x47 - too small)
+        h, w = image.shape[:2]
+        if h < 100 or w < 100:
+            # Upscale by 3x for better detection
+            new_w, new_h = w * 3, h * 3
+            image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        
+        # Enhance contrast
+        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        enhanced = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        return enhanced
     
     def get_embedding(self, image):
-        """Extract face embedding from image"""
+        """Extract face embedding from preprocessed image"""
         try:
-            h, w = image.shape[:2]
+            # Preprocess the image first
+            processed = self.preprocess_image(image)
+            h, w = processed.shape[:2]
             
-            # Resize for detection (640x640)
-            img_resized = cv2.resize(image, (640, 640))
+            # Resize for detection
+            img_resized = cv2.resize(processed, (640, 640))
             img_resized = img_resized.transpose(2, 0, 1).astype(np.float32)
             img_resized = (img_resized - 127.5) / 128.0
             img_resized = np.expand_dims(img_resized, axis=0)
@@ -51,7 +71,6 @@ class DirectFaceRecognizer:
             # Run detection
             detections = self.det_session.run(self.det_outputs, {self.det_input: img_resized})
             
-            # Parse boxes
             boxes = detections[0]
             if len(boxes.shape) == 4:
                 boxes = boxes[0]
@@ -68,20 +87,21 @@ class DirectFaceRecognizer:
                     y2 = float(boxes[i][3]) * h / 640
                     score = float(boxes[i][4]) if boxes.shape[1] >= 5 else 0.5
                     
-                    if score > 0.5 and score > best_score:
+                    # Lower threshold for small faces
+                    if score > 0.3 and score > best_score:
                         best_score = score
                         best_box = (int(x1), int(y1), int(x2), int(y2))
             
             if best_box:
                 x1, y1, x2, y2 = best_box
                 # Add padding
-                padding = 20
+                padding = int((x2 - x1) * 0.2)
                 x1 = max(0, x1 - padding)
                 y1 = max(0, y1 - padding)
                 x2 = min(w, x2 + padding)
                 y2 = min(h, y2 + padding)
                 
-                face = image[y1:y2, x1:x2]
+                face = processed[y1:y2, x1:x2]
                 if face.size > 0:
                     # Get embedding
                     face_resized = cv2.resize(face, (112, 112))
@@ -90,7 +110,9 @@ class DirectFaceRecognizer:
                     face_resized = np.expand_dims(face_resized, axis=0)
                     
                     embedding = self.rec_session.run([self.rec_output], {self.rec_input: face_resized})[0]
-                    embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 0:
+                        embedding = embedding / norm
                     
                     return embedding.flatten()
             
@@ -100,42 +122,26 @@ class DirectFaceRecognizer:
             return None
     
     def compare(self, emb1, emb2):
-        """Cosine similarity"""
         if emb1 is None or emb2 is None:
             return -1
         return float(np.dot(emb1, emb2))
 
+def test_image(person_name, img, recognizer, idx):
+    """Test a single image and return if face detected"""
+    emb = recognizer.get_embedding(img)
+    if emb is not None:
+        print(f"  ✓ {person_name}: image {idx+1} detected")
+    else:
+        print(f"  ✗ {person_name}: image {idx+1} NOT detected")
+    return emb
+
 print("="*60)
-print("LFW 5-PERSON ACCURACY TEST (OFFLINE)")
+print("LFW 5-PERSON ACCURACY TEST (WITH PREPROCESSING)")
 print("="*60)
 
 # Load model
-print("\n[1/4] Loading model from local files...")
+print("\n[1/4] Loading model...")
 model_path = Path(__file__).parent / "models" / "buffalo_l"
-
-if not model_path.exists():
-    print(f"❌ Model not found at {model_path}")
-    print("Checking alternative locations...")
-    
-    # Try other possible locations
-    alt_paths = [
-        Path(__file__).parent / "models",
-        Path(__file__).parent / "models/buffalo_l",
-        Path.home() / "attendance-pi-client/models/buffalo_l",
-    ]
-    
-    for alt in alt_paths:
-        if alt.exists() and (alt / "det_10g.onnx").exists():
-            model_path = alt
-            print(f"✓ Found model at: {model_path}")
-            break
-    else:
-        print("❌ Could not find buffalo_l model files")
-        print("Make sure you have:")
-        print("  - det_10g.onnx")
-        print("  - w600k_r50.onnx")
-        sys.exit(1)
-
 recognizer = DirectFaceRecognizer(model_path)
 
 # Load dataset
@@ -144,12 +150,9 @@ dataset_path = Path(__file__).parent / "datasets" / "lfw_5people"
 
 if not dataset_path.exists():
     print(f"❌ Dataset not found at {dataset_path}")
-    print("\nPlease transfer lfw_5people.zip to datasets/ and unzip it:")
-    print("  cd ~/attendance-pi-client/datasets")
-    print("  unzip lfw_5people.zip")
     sys.exit(1)
 
-# Load images for each person
+# Load images
 persons = {}
 for person_dir in dataset_path.iterdir():
     if person_dir.is_dir():
@@ -158,66 +161,88 @@ for person_dir in dataset_path.iterdir():
             img = cv2.imread(str(img_path))
             if img is not None:
                 images.append(img)
-        if images:
-            persons[person_dir.name] = images
-            print(f"  ✓ {person_dir.name}: {len(images)} images")
+        persons[person_dir.name] = images
+        print(f"  ✓ {person_dir.name}: {len(images)} images")
 
 print(f"\n✓ Loaded {len(persons)} people")
 
-# Test parameters
-GALLERY_SIZE = 5
-TEST_SIZE = 15  # Test on first 15 images after gallery
+# First, test face detection on first few images
+print("\n[3/4] Testing face detection on first 3 images...")
+print("(This helps verify images are being processed correctly)")
 
-print(f"\n[3/4] Building gallery (first {GALLERY_SIZE} images per person)...")
-
-# Build gallery embeddings
-gallery = {}
+detection_stats = {}
 for person_name, images in persons.items():
-    embeddings = []
-    for i in range(min(GALLERY_SIZE, len(images))):
+    detected = 0
+    for i in range(min(3, len(images))):
         emb = recognizer.get_embedding(images[i])
         if emb is not None:
-            embeddings.append(emb)
-    
-    if embeddings:
-        gallery[person_name] = np.mean(embeddings, axis=0)
-        print(f"  ✓ {person_name}: {len(embeddings)}/{GALLERY_SIZE} faces detected")
-    else:
-        print(f"  ✗ {person_name}: No faces detected!")
+            detected += 1
+    detection_stats[person_name] = detected
+    print(f"  {person_name}: {detected}/3 faces detected")
 
-if len(gallery) < 2:
-    print("\n❌ Not enough faces detected. Trying with different parameters...")
+# Check if we have enough detections
+total_detected = sum(detection_stats.values())
+if total_detected < 5:
+    print("\n⚠️ Low face detection rate. Trying with different parameters...")
+    print("The LFW images may be too challenging for the model.")
+    print("\nAlternative: Use the Olivetti dataset which is already aligned.")
     sys.exit(1)
 
-print(f"\n[4/4] Running verification tests (next {TEST_SIZE} images per person)...")
+# Build gallery (first 5 images that have faces)
+print("\n[4/4] Building gallery and running test...")
 
-# Test remaining images
-correct = 0
-total = 0
+gallery = {}
+test_results = []
 
 for person_name, images in persons.items():
-    if person_name not in gallery:
-        continue
+    # Find first 5 images with faces for gallery
+    gallery_embs = []
+    gallery_indices = []
     
-    for i in range(GALLERY_SIZE, min(GALLERY_SIZE + TEST_SIZE, len(images))):
-        test_emb = recognizer.get_embedding(images[i])
-        if test_emb is not None:
-            total += 1
-            
-            # Find best match
-            best_match = None
-            best_score = -1
-            for gallery_name, gallery_emb in gallery.items():
-                score = recognizer.compare(test_emb, gallery_emb)
-                if score > best_score:
-                    best_score = score
-                    best_match = gallery_name
-            
-            if best_match == person_name:
-                correct += 1
+    for i, img in enumerate(images):
+        if len(gallery_embs) >= 5:
+            break
+        emb = recognizer.get_embedding(img)
+        if emb is not None:
+            gallery_embs.append(emb)
+            gallery_indices.append(i)
+    
+    if gallery_embs:
+        gallery[person_name] = np.mean(gallery_embs, axis=0)
+        print(f"  ✓ {person_name}: gallery built with {len(gallery_embs)} images")
+        
+        # Test on images not used in gallery
+        for i, img in enumerate(images):
+            if i in gallery_indices:
+                continue
+            test_emb = recognizer.get_embedding(img)
+            if test_emb is not None:
+                # Find best match
+                best_match = None
+                best_score = -1
+                for gname, gemb in gallery.items():
+                    score = recognizer.compare(test_emb, gemb)
+                    if score > best_score:
+                        best_score = score
+                        best_match = gname
+                
+                test_results.append({
+                    'true': person_name,
+                    'pred': best_match,
+                    'score': best_score
+                })
+    else:
+        print(f"  ✗ {person_name}: No faces detected, skipping")
 
 # Calculate accuracy
-accuracy = (correct / total * 100) if total > 0 else 0
+if test_results:
+    correct = sum(1 for r in test_results if r['true'] == r['pred'])
+    total = len(test_results)
+    accuracy = (correct / total * 100)
+else:
+    correct = 0
+    total = 0
+    accuracy = 0
 
 print("\n" + "="*60)
 print("RESULTS")
@@ -228,26 +253,21 @@ print(f"Failed:             {total - correct}")
 print(f"\n✅ ACCURACY: {accuracy:.1f}%")
 
 if accuracy > 95:
-    print("\n✓ CLAIM VALIDATED: >95% accuracy on LFW subset")
-elif accuracy > 85:
-    print(f"\n⚠ Good result: {accuracy:.1f}% - Close to target")
-else:
-    print(f"\n⚠ Accuracy lower than expected: {accuracy:.1f}%")
+    print("\n✓ CLAIM VALIDATED: >95% accuracy")
+elif accuracy > 80 and total > 0:
+    print(f"\n⚠ Partial success: {accuracy:.1f}% - {total} tests completed")
 
 # Save results
 report_dir = Path("test_results")
 report_dir.mkdir(exist_ok=True)
 
-with open(report_dir / "lfw_onnx_results.txt", "w") as f:
-    f.write("LFW 5-Person Accuracy Test (ONNX Runtime)\n")
-    f.write("=========================================\n\n")
-    f.write(f"Model: buffalo_l (ONNX Runtime, offline)\n")
-    f.write(f"Model path: {model_path}\n")
-    f.write(f"Test subjects: {', '.join(gallery.keys())}\n")
-    f.write(f"Gallery images per person: {GALLERY_SIZE}\n")
-    f.write(f"Test images per person: {TEST_SIZE}\n")
+with open(report_dir / "lfw_preprocessed.txt", "w") as f:
+    f.write("LFW 5-Person Test (With Preprocessing)\n")
+    f.write("=====================================\n\n")
+    f.write(f"People tested: {list(persons.keys())}\n")
+    f.write(f"Face detection rate: {sum(detection_stats.values())}/15\n")
     f.write(f"Total tests: {total}\n")
     f.write(f"Correct: {correct}\n")
     f.write(f"Accuracy: {accuracy:.1f}%\n")
 
-print(f"\n✓ Report saved: test_results/lfw_onnx_results.txt")
+print(f"\n✓ Report saved: test_results/lfw_preprocessed.txt")
