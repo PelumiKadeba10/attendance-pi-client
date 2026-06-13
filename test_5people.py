@@ -15,7 +15,7 @@ print("="*60)
 
 # Load model from local folder
 print("\n[1/3] Loading InsightFace model...")
-model_path = Path(__file__).parent / "models"
+model_path = Path(__file__).parent / "models " / "buffalo_l"
 app = FaceAnalysis(name='buffalo_l', root=str(model_path))
 app.prepare(ctx_id=0, det_size=(320, 320))
 print("✓ Model loaded")
