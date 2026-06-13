@@ -1,1 +1,60 @@
-__pycache__
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+ENV/
+
+# Models (your buffalo_l folder - too large for git)
+models/
+*.onnx
+*.pb
+*.pth
+*.pt
+
+# Datasets (large image folders)
+datasets/
+test_dataset/
+test_faces/
+test_photos/
+lfw_dataset/
+
+# Test results (optional - keep if you want version control)
+
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Storage (attendance data - keep local only)
+storage/
+attendance_exports/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.save
+*.backup
+*.tmp
+
+# Sensitive configs (if any)
+config_local.py
+.secrets
+*.key
+*.crt
+
+# Large archives
+*.zip
+*.tgz
+*.tar.gz
+*.7z

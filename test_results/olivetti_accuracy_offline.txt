@@ -1,0 +1,8 @@
+Olivetti Faces Test Results (Offline Mode)
+=========================================
+Model: buffalo_l (ONNX Runtime)
+Model path: /home/attendance/attendance-pi-client/models/buffalo_l
+Dataset: Olivetti Faces (400 images, 40 people)
+Total tests: 0
+Correct: 0
+Accuracy: 0.0%

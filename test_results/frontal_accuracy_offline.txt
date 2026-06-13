@@ -1,0 +1,11 @@
+Frontal Face Accuracy Test Report
+================================
+
+Test Date: 2026-06-13 15:06:02
+Model: InsightFace buffalo_l (offline)
+Mode: Completely offline - no internet connection used
+Total Tests: 0
+Correct: 0
+Accuracy: 0.0%
+Threshold: >95%
+Result: FAIL

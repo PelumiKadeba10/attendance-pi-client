@@ -1,0 +1,12 @@
+LFW Direct Recognition Test Results
+===================================
+
+Test date: 2026-06-13 17:47:49
+Model: buffalo_l (recognition only, no detection)
+Method: Pre-cropped faces fed directly to recognition model
+Gallery size: 5 images/person
+Test size: 30 images/person
+People tested: ['Colin_Powell', 'Ariel_Sharon', 'George_W_Bush', 'Donald_Rumsfeld', 'Tony_Blair']
+Total tests: 150
+Correct: 149
+Accuracy: 99.3%
