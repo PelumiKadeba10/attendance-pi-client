@@ -115,7 +115,7 @@ recognizer = DirectFaceRecognizer(model_path)
 print("\n[2/4] Loading LFW dataset...")
 
 possible_paths = [
-    Path(__file__).parent / "datasets" / "lfw_funneled",
+    Path(__file__).parent / "datasets" ,
     Path(__file__).parent / "datasets" / "lfw_5people_fullres",
     Path(__file__).parent / "datasets" / "lfw_5people",
 ]
