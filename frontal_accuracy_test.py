@@ -5,133 +5,37 @@ Frontal Face Accuracy Test for Attendance System
 
 import cv2
 import numpy as np
-import onnxruntime as ort
 from pathlib import Path
 import sys
 import time
+
+# Use InsightFace's built-in API
+try:
+    from insightface.app import FaceAnalysis
+    HAS_INSIGHTFACE = True
+except ImportError:
+    print("Installing insightface...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "insightface"])
+    from insightface.app import FaceAnalysis
+    HAS_INSIGHTFACE = True
 
 class FaceRecognizer:
     def __init__(self, model_path):
         print("Initializing face recognition model...")
         
-        det_path = Path(model_path) / "det_10g.onnx"
-        rec_path = Path(model_path) / "w600k_r50.onnx"
-        
-        if not det_path.exists():
-            print(f"Error: Detection model not found at {det_path}")
-            sys.exit(1)
-        if not rec_path.exists():
-            print(f"Error: Recognition model not found at {rec_path}")
-            sys.exit(1)
-        
-        self.det_session = ort.InferenceSession(str(det_path), providers=['CPUExecutionProvider'])
-        self.rec_session = ort.InferenceSession(str(rec_path), providers=['CPUExecutionProvider'])
-        
-        # Get input/output names
-        self.det_input_name = self.det_session.get_inputs()[0].name
-        self.det_output_names = [output.name for output in self.det_session.get_outputs()]
-        
-        self.rec_input_name = self.rec_session.get_inputs()[0].name
-        self.rec_output_name = self.rec_session.get_outputs()[0].name
+        # Use InsightFace's built-in API
+        self.app = FaceAnalysis(name='buffalo_l', root=str(Path(model_path).parent))
+        self.app.prepare(ctx_id=0, det_size=(640, 640))
         
         print("Model ready.\n")
     
-    def get_face_crop(self, image):
-        """Detect face and return cropped face region"""
-        h, w = image.shape[:2]
-        
-        # Prepare image for detection
-        img_resized = cv2.resize(image, (640, 640))
-        img_resized = img_resized.transpose(2, 0, 1).astype(np.float32)
-        img_resized = (img_resized - 127.5) / 128.0
-        img_resized = np.expand_dims(img_resized, axis=0)
-        
-        # Run detection
-        detections = self.det_session.run(
-            self.det_output_names, 
-            {self.det_input_name: img_resized}
-        )
-        
-        # Parse detection results
-        # The output format: [boxes, scores, landmarks] or similar
-        boxes = detections[0]  # First output is usually boxes
-        scores = detections[1] if len(detections) > 1 else None
-        
-        # Handle different output formats
-        if len(boxes.shape) == 4:
-            boxes = boxes[0]  # Remove batch dimension
-        
-        # Find best detection
-        best_box = None
-        best_score = 0
-        
-        for i in range(boxes.shape[0]):
-            # Get score
-            if scores is not None:
-                if len(scores.shape) == 2:
-                    score = scores[i][0] if scores.shape[1] > 0 else scores[i]
-                else:
-                    score = scores[i] if len(scores.shape) == 1 else scores[i][0]
-            else:
-                # If no separate scores, assume last value in box is score
-                if boxes.shape[1] >= 5:
-                    score = boxes[i][4]
-                else:
-                    score = 1.0
-            
-            # Get bounding box
-            if boxes.shape[1] >= 4:
-                x1, y1, x2, y2 = boxes[i][:4]
-                
-                # Scale back to original image size
-                x1 = int(x1 * w / 640)
-                y1 = int(y1 * h / 640)
-                x2 = int(x2 * w / 640)
-                y2 = int(y2 * h / 640)
-                
-                # Ensure coordinates are within image bounds
-                x1 = max(0, x1)
-                y1 = max(0, y1)
-                x2 = min(w, x2)
-                y2 = min(h, y2)
-                
-                if score > 0.5 and score > best_score and (x2 - x1) > 20 and (y2 - y1) > 20:
-                    best_score = score
-                    best_box = (x1, y1, x2, y2)
-        
-        if best_box:
-            x1, y1, x2, y2 = best_box
-            # Add padding
-            padding = 20
-            x1 = max(0, x1 - padding)
-            y1 = max(0, y1 - padding)
-            x2 = min(w, x2 + padding)
-            y2 = min(h, y2 + padding)
-            
-            face_crop = image[y1:y2, x1:x2]
-            if face_crop.size > 0:
-                return face_crop
-        
+    def get_embedding(self, image):
+        """Extract face embedding directly from image"""
+        faces = self.app.get(image)
+        if faces and len(faces) > 0:
+            return faces[0].embedding
         return None
-    
-    def get_embedding(self, face_crop):
-        """Extract face embedding from cropped face"""
-        # Resize to 112x112 for recognition
-        face_resized = cv2.resize(face_crop, (112, 112))
-        face_resized = face_resized.transpose(2, 0, 1).astype(np.float32)
-        face_resized = (face_resized - 127.5) / 128.0
-        face_resized = np.expand_dims(face_resized, axis=0)
-        
-        # Run recognition
-        embedding = self.rec_session.run(
-            [self.rec_output_name], 
-            {self.rec_input_name: face_resized}
-        )[0]
-        
-        # Normalize
-        embedding = embedding / np.linalg.norm(embedding)
-        
-        return embedding.flatten()
     
     def compare(self, emb1, emb2):
         """Cosine similarity between embeddings"""
@@ -142,7 +46,7 @@ def create_test_dataset():
     
     test_dir = Path(__file__).parent / "test_dataset"
     
-    # Clear existing test data if needed
+    # Clear existing test data
     if test_dir.exists():
         import shutil
         shutil.rmtree(test_dir)
@@ -175,7 +79,7 @@ def create_test_dataset():
             # Nose
             cv2.line(img, (100, 90), (100, 110), (150, 120, 100), 3)
             
-            # Mouth (different for each subject)
+            # Mouth
             if subject_name == "Subject_001":
                 cv2.ellipse(img, (100, 135), (20, 10), 0, 0, 180, features["mouth"], -1)
             elif subject_name == "Subject_002":
@@ -183,7 +87,7 @@ def create_test_dataset():
             else:
                 cv2.ellipse(img, (100, 135), (20, 12), 0, 0, 360, features["mouth"], -1)
             
-            # Add slight variation for different samples
+            # Add slight variation
             if i >= 3:
                 if subject_name == "Subject_001":
                     cv2.ellipse(img, (100, 135), (15, 8), 0, 0, 180, features["mouth"], -1)
@@ -234,9 +138,8 @@ def run_accuracy_test():
     for subject in subjects_data:
         embeddings = []
         for i in range(2):  # First 2 samples as reference
-            face = recognizer.get_face_crop(subject["samples"][i])
-            if face is not None:
-                emb = recognizer.get_embedding(face)
+            emb = recognizer.get_embedding(subject["samples"][i])
+            if emb is not None:
                 embeddings.append(emb)
         
         if embeddings:
@@ -246,19 +149,24 @@ def run_accuracy_test():
                 "id": subject["id"],
                 "embedding": avg_emb
             })
+            print(f"  ✓ {subject['id']}")
     
-    print(f"Gallery built: {len(gallery)} reference identities\n")
+    print(f"\nGallery built: {len(gallery)} reference identities\n")
     
     # Execute verification tests
     print("Executing verification tests...")
     correct = 0
     total = 0
+    results_detail = []
     
     for subject in subjects_data:
+        subject_correct = 0
+        subject_total = 0
+        
         for i in range(2, len(subject["samples"])):  # Remaining samples for testing
-            face = recognizer.get_face_crop(subject["samples"][i])
-            if face is not None:
-                test_emb = recognizer.get_embedding(face)
+            test_emb = recognizer.get_embedding(subject["samples"][i])
+            if test_emb is not None:
+                subject_total += 1
                 total += 1
                 
                 best_match = None
@@ -271,7 +179,15 @@ def run_accuracy_test():
                         best_match = g["id"]
                 
                 if best_match == subject["id"]:
+                    subject_correct += 1
                     correct += 1
+        
+        results_detail.append({
+            "subject": subject["id"],
+            "correct": subject_correct,
+            "total": subject_total,
+            "accuracy": (subject_correct / subject_total * 100) if subject_total > 0 else 0
+        })
     
     accuracy = (correct / total * 100) if total > 0 else 0
     
@@ -279,9 +195,13 @@ def run_accuracy_test():
     print("\n" + "="*60)
     print("TEST RESULTS")
     print("="*60)
-    print(f"Total verification attempts: {total}")
-    print(f"Successful verifications:    {correct}")
-    print(f"Failed verifications:        {total - correct}")
+    
+    for r in results_detail:
+        print(f"{r['subject']}: {r['correct']}/{r['total']} ({r['accuracy']:.1f}%)")
+    
+    print("-"*60)
+    print(f"TOTAL: {correct}/{total} ({accuracy:.1f}%)")
+    
     print(f"\nFrontal Face Accuracy: {accuracy:.2f}%")
     
     if accuracy > 95:
@@ -306,6 +226,9 @@ def run_accuracy_test():
         f.write(f"Accuracy Rate: {accuracy:.2f}%\n")
         f.write(f"Required Threshold: >95%\n")
         f.write(f"Overall Result: {'PASS' if accuracy > 95 else 'FAIL'}\n")
+        f.write("\nPer-Subject Results:\n")
+        for r in results_detail:
+            f.write(f"  {r['subject']}: {r['correct']}/{r['total']} ({r['accuracy']:.1f}%)\n")
     
     print(f"\nReport saved: {report_path}")
     
