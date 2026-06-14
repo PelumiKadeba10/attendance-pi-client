@@ -320,6 +320,7 @@ class PiAttendanceApp:
 
         try:
             while not self.stop_event.is_set():
+                start_time = time.time()
                 try:
                     self._run_state_machine()
                 except Exception:
@@ -329,6 +330,17 @@ class PiAttendanceApp:
                         "Unhandled error in lifecycle loop.",
                         {"component": "main_loop"},
                     )
+                    
+                execution_latency_ms = (time.time() - start_time) * 1000
+                
+                if self._last_state == "RECORDING":
+                    print(f"[BENCHMARK] State Machine Loop Latency: {execution_latency_ms:.2f} ms | State: {self._last_state} | Active Session: {self._last_session_id}")
+                    self.logger.info(
+                        "[BENCHMARK] State Machine Loop Latency: %.2f ms | Active Session: %s",
+                        execution_latency_ms,
+                        self._last_session_id
+                    )
+                    
                 time.sleep(1)
         finally:
             self.stop_event.set()
