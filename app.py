@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 import cv2
+import subprocess
+
 
 from config import (
     ATTENDANCE_EXPORT_DIR,
@@ -24,6 +26,30 @@ from services.logger import get_logger, initialize_logging
 from services.session_manager import SessionManager
 from services.upload_service import UploadService
 
+def init_camera():
+    print("Configuring camera hardware settings via v4l2-ctl...")
+    
+    # 1. Force the Linux hardware driver parameter
+    # Change '200' to whatever numeric value looked clearest during your test
+    brightness_value = 120  
+    
+    try:
+        subprocess.run(
+            [f"v4l2-ctl -d /dev/video0 --set-ctrl=brightness={brightness_value}"], 
+            shell=True, 
+            check=True
+        )
+        print(f"Successfully set hardware brightness to {brightness_value}")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Failed to set hardware brightness via v4l2-ctl: {e}")
+
+    # 2. Initialize the OpenCV Video Capture stream
+    cap = cv2.VideoCapture(0)
+    
+    # Give the hardware sensor a brief moment to settle into the new exposure
+    time.sleep(1.0) 
+    
+    return cap.release()  # We just want to trigger the hardware initialization, the AI pipeline will open it again
 
 @dataclass
 class RuntimeContext:
@@ -369,4 +395,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    camera = init_camera()
     main()
