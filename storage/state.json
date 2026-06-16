@@ -1,26 +1,26 @@
 {
   "active_sessions": [
     {
-      "course_code": "Test #1",
-      "end_time": "15:30:00",
-      "session_date": "2026-06-13",
-      "session_id": "18",
-      "start_time": "14:18:00",
+      "course_code": "Test 2",
+      "end_time": "01:32:00",
+      "session_date": "2026-06-16",
+      "session_id": "21",
+      "start_time": "01:30:00",
       "status": "active",
-      "title": "Test Session"
+      "title": null
     }
   ],
-  "last_sync_at": "2026-06-14T22:51:28.482736",
+  "last_sync_at": "2026-06-16T01:35:25.885894",
   "refresh_interval": 10,
   "current_state": "STOPPED",
   "last_known_session": {
-    "course_code": "Test #1",
-    "end_time": "15:30:00",
-    "session_date": "2026-06-13",
-    "session_id": "18",
-    "start_time": "14:18:00",
+    "course_code": "Test 2",
+    "end_time": "01:32:00",
+    "session_date": "2026-06-16",
+    "session_id": "21",
+    "start_time": "01:30:00",
     "status": "active",
-    "title": "Test Session"
+    "title": null
   },
-  "last_state_session_id": "18"
+  "last_state_session_id": "21"
 }
