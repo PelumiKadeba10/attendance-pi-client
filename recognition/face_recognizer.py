@@ -90,25 +90,34 @@ class InsightFaceRecognizer:
     def _process_frame(self, frame, callback: Callable[[str, float], None]) -> None:
         now = datetime.now()
         detections = self._detect_faces(frame)
+        
+        # ADD THIS
+        self.logger.debug("Detections found: %d", len(detections))
+        
         tracks = self.tracker.update(detections, now=now)
-
-        # 🚀 OPTIMIZATION: Map bounding boxes to detections in a fast lookup dictionary
-        # We turn the bbox list into a tuple so it can be used as a dictionary key
         detection_lookup = {tuple(det["bbox"]): det for det in detections}
 
         for track in tracks:
-            # Instantly find the matching detection without a nested loop
             track_bbox = tuple(track["bbox"])
             matching_detection = detection_lookup.get(track_bbox)
 
             if matching_detection is None:
                 continue
 
-            if not self.tracker.should_recognize(
+            should_rec = self.tracker.should_recognize(
                 int(track["track_id"]),
                 detection_embedding=matching_detection["embedding"],
                 detection_confidence=float(matching_detection.get("confidence") or 0.0),
-            ):
+            )
+            
+            # ADD THIS
+            self.logger.debug(
+                "Track %s should_recognize=%s confidence=%s",
+                track["track_id"], should_rec,
+                round(float(matching_detection.get("confidence") or 0.0), 3),
+            )
+            
+            if not should_rec:
                 continue
 
             embedding_index = None
@@ -116,12 +125,20 @@ class InsightFaceRecognizer:
                 embedding_index = self.embedding_client.get_embedding_index()
 
             if embedding_index is None:
+                self.logger.debug("Embedding index is None — skipping match.")  # ADD
                 continue
 
             student_id, match_score = embedding_index.match(
                 query_embedding=matching_detection["embedding"],
                 threshold=CONFIDENCE_THRESHOLD,
             )
+            
+            # ADD THIS
+            self.logger.debug(
+                "Match result: student_id=%s score=%s threshold=%s",
+                student_id, round(float(match_score or 0), 4), CONFIDENCE_THRESHOLD,
+            )
+            
             if student_id is None:
                 continue
 
@@ -133,7 +150,7 @@ class InsightFaceRecognizer:
                 now=now,
             )
             callback(student_id, float(match_score))
-            
+                    
     def run(self, callback: Callable[[str, float], None], stop_event: threading.Event) -> None:
         self.logger.info("Recognition loop started.")
         while not stop_event.is_set():
