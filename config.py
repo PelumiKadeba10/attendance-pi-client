@@ -33,7 +33,7 @@ LOG_DIR = REPO_ROOT / "logs"
 LOG_FILE = LOG_DIR / "pi.log"
 
 # InsightFace model cache location.
-INSIGHTFACE_MODEL_ROOT = str(REPO_ROOT / "models")
+INSIGHTFACE_MODEL_ROOT = str(REPO_ROOT)
 
 # Logging
 LOG_MAX_BYTES = 5 * 1024 * 1024
