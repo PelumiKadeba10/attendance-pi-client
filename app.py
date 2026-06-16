@@ -262,46 +262,71 @@ class PiAttendanceApp:
         # -----------------------------
         # 1. MAP BACKEND STATE → PI STATE
         # -----------------------------
-        if raw_state == "active":
+        if raw_state == "RECORDING":
             state = "RECORDING"
-        elif raw_state == "inactive":
-            state = "IDLE"
+        elif raw_state in ("STOPPED", "READY"):
+            state = "STOPPED"
         else:
             state = "IDLE"
 
-        # track state change
+        # -----------------------------
+        # 2. LOG EVERY TICK
+        # -----------------------------
+        self.logger.debug(
+            "TICK raw_state=%s mapped_state=%s previous=%s session_id=%s",
+            raw_state, state, previous_state, session_id,
+        )
+
+        # -----------------------------
+        # 3. LOG + TRACK STATE CHANGES
+        # -----------------------------
         if state != previous_state:
             self.logger.info(
-                "STATE_CHANGE previous=%s current=%s session_id=%s",
-                previous_state,
-                state,
-                session_id,
+                "STATE_CHANGE previous=%s current=%s session_id=%s course=%s",
+                previous_state, state, session_id, course_code,
             )
             self.ctx.device_logger.log(
-                "SESSION_STATE_CHANGE",
-                "State machine transition.",
+                "APP_STATE_CHANGE",
+                "App state machine transition.",
                 {
                     "previous": previous_state,
                     "current": state,
                     "session_id": session_id or "UNKNOWN",
+                    "course_code": course_code or "UNKNOWN",
                 },
             )
             self._last_state = state
 
         # -----------------------------
-        # 2. RECORDING STATE → START AI
+        # 4. RECORDING → START RECOGNITION
         # -----------------------------
         if state == "RECORDING":
+            if previous_state != "RECORDING":
+                self.logger.info(
+                    "ENTERING_RECORDING session_id=%s course=%s",
+                    session_id, course_code,
+                )
             self._ensure_recognition()
             return
 
-        # if not recording → stop camera
+        # -----------------------------
+        # 5. NOT RECORDING → STOP RECOGNITION
+        # -----------------------------
+        if previous_state == "RECORDING" and state != "RECORDING":
+            self.logger.info(
+                "LEAVING_RECORDING previous=%s current=%s session_id=%s",
+                previous_state, state, session_id,
+            )
         self._stop_recognition()
 
         # -----------------------------
-        # 3. STOPPED LOGIC (flush data)
+        # 6. FLUSH ON SESSION END
         # -----------------------------
-        if previous_state == "RECORDING" and state == "IDLE" and session_id and course_code:
+        if previous_state == "RECORDING" and state == "STOPPED" and session_id and course_code:
+            self.logger.info(
+                "FLUSH_TRIGGERED session_id=%s course=%s",
+                session_id, course_code,
+            )
             self._flush_collector(
                 session_id=session_id,
                 course_code=course_code,
@@ -310,11 +335,17 @@ class PiAttendanceApp:
             return
 
         # -----------------------------
-        # 4. IDLE / READY STATES
+        # 7. IDLE / STOPPED WAITING
         # -----------------------------
         if state == "IDLE":
-            self.logger.debug("System idle - waiting for active session.")
+            self.logger.debug("IDLE waiting for active session.")
             return
+
+        if state == "STOPPED":
+            self.logger.debug(
+                "STOPPED session_id=%s waiting for session window to open.",
+                session_id,
+            )
         
         
     def run(self) -> None:
@@ -327,6 +358,11 @@ class PiAttendanceApp:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
         self.ctx.session_manager.restore_state()
+        self.ctx.device_logger.log(
+            "State Restored",
+            "Pi attendance client state restored.",
+            {"device_id": DEVICE_ID},
+        )
         self.ctx.session_manager.refresh_sessions()
         self.ctx.embedding_client.refresh_embeddings()
         current_session = self._current_primary_session()
