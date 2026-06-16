@@ -36,7 +36,7 @@ logs/
 
 # Storage (attendance data - keep local only)
 storage/
-attendance_exports/
+
 
 # System files
 .DS_Store
