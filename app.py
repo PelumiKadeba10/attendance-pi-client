@@ -29,27 +29,32 @@ from services.upload_service import UploadService
 def init_camera():
     print("Configuring camera hardware settings via v4l2-ctl...")
     
-    # 1. Force the Linux hardware driver parameter
-    # Change '200' to whatever numeric value looked clearest during your test
-    brightness_value = 120  
-    
     try:
-        subprocess.run(
-            [f"v4l2-ctl -d /dev/video0 --set-ctrl=brightness={brightness_value}"], 
-            shell=True, 
-            check=True
+        subprocess.run([
+            "v4l2-ctl -d /dev/video0 "
+            "--set-ctrl=brightness=130 "      # up from 120 (max 255)
+            "--set-ctrl=contrast=160 "        # up slightly from 148
+            "--set-ctrl=saturation=90 "       # keep default
+            "--set-ctrl=gamma=4 "             # lower = brighter (default 4)
+            "--set-ctrl=backlight_compensation=1 "  # max (helps dark skin tones)
+            "--set-ctrl=sharpness=5"          # up from 3 for better feature detection
+        ], shell=True, check=True)
+        print("Camera settings applied.")
+        DeviceLogService.log_static(
+            "CAMERA_CONFIG_SUCCESS",
+            "Camera hardware settings configured successfully.",
+            {"device_id": DEVICE_ID},
         )
-        print(f"Successfully set hardware brightness to {brightness_value}")
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to set hardware brightness via v4l2-ctl: {e}")
-
-    # 2. Initialize the OpenCV Video Capture stream
+        print(f"Warning: Failed to set camera controls: {e}")
+        DeviceLogService.log_static(
+            "CAMERA_CONFIG_FAILED",
+            "Failed to configure camera hardware settings.",
+            {"device_id": DEVICE_ID, "error": str(e)},
+        )
     cap = cv2.VideoCapture(0)
-    
-    # Give the hardware sensor a brief moment to settle into the new exposure
-    time.sleep(1.0) 
-    
-    return cap.release()  # We just want to trigger the hardware initialization, the AI pipeline will open it again
+    time.sleep(1.0)
+    return cap.release()
 
 @dataclass
 class RuntimeContext:
@@ -395,13 +400,13 @@ class PiAttendanceApp:
                     
                 execution_latency_ms = (time.time() - start_time) * 1000
                 
-                if self._last_state == "RECORDING":
-                    print(f"[BENCHMARK] State Machine Loop Latency: {execution_latency_ms:.2f} ms | State: {self._last_state} | Active Session: {self._last_session_id}")
-                    self.logger.info(
-                        "[BENCHMARK] State Machine Loop Latency: %.2f ms | Active Session: %s",
-                        execution_latency_ms,
-                        self._last_session_id
-                    )
+                # if self._last_state == "RECORDING":
+                #     print(f"[BENCHMARK] State Machine Loop Latency: {execution_latency_ms:.2f} ms | State: {self._last_state} | Active Session: {self._last_session_id}")
+                #     self.logger.info(
+                #         "[BENCHMARK] State Machine Loop Latency: %.2f ms | Active Session: %s",
+                #         execution_latency_ms,
+                #         self._last_session_id
+                #     )
                     
                 time.sleep(1)
         finally:
